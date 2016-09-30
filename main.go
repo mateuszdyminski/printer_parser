@@ -6,9 +6,8 @@ import (
 	"io/ioutil"
 	"net/http"
 	"os"
-	"time"
-
 	"strings"
+	"time"
 
 	"github.com/BurntSushi/toml"
 	"github.com/PuerkitoBio/goquery"
@@ -26,47 +25,60 @@ func main() {
 		return
 	}
 
-	printers := make([]printer, 0, 0)
-	for _, page := range cfg.Pages {
+	products := make([]product, 0, 0)
+	currentPage := 1
+	continueWork := true
+	for continueWork {
+		url := fmt.Sprintf("%s%d", cfg.RootPage, currentPage)
 		// load content
-		resp, err := http.Get(page)
+		resp, err := http.Get(url)
 		if err != nil {
-			fmt.Printf("Can't fetch http content from page: %s. Err: %v \n", page, err)
+			fmt.Printf("Can't fetch http content from page: %s. Err: %v \n", url, err)
 			return
 		}
 
 		doc, err := goquery.NewDocumentFromResponse(resp)
 		if err != nil {
-			fmt.Printf("Can't parse html document. Err: %v \n", page, err)
+			fmt.Printf("Can't parse html document. Err: %v \n", url, err)
 			return
 		}
 
 		selection := doc.Find(".productListing tr")
 
 		for _, node := range selection.Nodes {
-			printer := printer{}
-			innerPrinter := goquery.NewDocumentFromNode(node)
+			product := product{}
+			innerProduct := goquery.NewDocumentFromNode(node)
 
-			productTd := innerPrinter.Find("td")
+			productTd := innerProduct.Find("td")
 			for i := 0; i < len(productTd.Nodes); i++ {
-				// if i == 1 <- get link and the name of the printer, ean, serial number
+				// if i == 1 <- get link and the name of the product, ean, serial number
 				if i == 1 {
-					linkToPrinter := goquery.NewDocumentFromNode(productTd.Nodes[i]).Find("a")
-					printer.Name = linkToPrinter.Nodes[0].FirstChild.Data
-					printer.Link = getAttr("href", linkToPrinter.Nodes[0].Attr)
+					linkToProduct := goquery.NewDocumentFromNode(productTd.Nodes[i]).Find("a")
+					product.Name = linkToProduct.Nodes[0].FirstChild.Data
+					product.Link = getAttr("href", linkToProduct.Nodes[0].Attr)
 
-					printerDescription := goquery.NewDocumentFromNode(productTd.Nodes[i]).Find("div")
+					productDescription := goquery.NewDocumentFromNode(productTd.Nodes[i]).Find("div")
 
-					number := printerDescription.Nodes[0].FirstChild.Data
-					if strings.Contains(number, "Artikelnr.: ") {
-						number = strings.TrimLeft(number, "Artikelnr.: ")
-						printer.Number = number
-					}
 
-					ean := printerDescription.Nodes[0].LastChild.Data
-					if strings.Contains(ean, "EAN Code: ") {
-						ean = strings.TrimLeft(ean, "EAN Code: ")
-						printer.Ean = ean
+					node := productDescription.Nodes[0].FirstChild
+					for node != nil {
+						value := node.Data
+						if strings.Contains(value, "Herstellernr.: ") {
+							value = strings.TrimLeft(value, "Herstellernr.: ")
+							product.ManufacturerNumber = value
+						}
+
+						if strings.Contains(value, "Artikelnr.: ") {
+							value = strings.TrimLeft(value, "Artikelnr.: ")
+							product.Ean = value
+						}
+
+						if strings.Contains(value, "EAN Code: ") {
+							value = strings.TrimLeft(value, "EAN Code: ")
+							product.Ean = value
+						}
+
+						node = node.NextSibling
 					}
 				}
 
@@ -84,19 +96,28 @@ func main() {
 						}
 
 						if isCurrencyImg(img.Attr) {
-							printer.Currency = getAttr("alt", img.Attr)
+							product.Currency = getAttr("alt", img.Attr)
 						}
 					}
 
-					printer.Price = price
+					product.Price = price
 				}
 			}
 
-			printers = append(printers, printer)
+			products = append(products, product)
 		}
+
+		if len(selection.Nodes) != 10 {
+			continueWork = false
+		} else {
+
+			currentPage += 1
+		}
+
+		fmt.Printf("Fetched and parsed %d products. Total number: %d\n", len(selection.Nodes), len(products))
 	}
 
-	filename := fmt.Sprintf("output/printers%s.csv", time.Now().Format("2006-01-02_15:04:05"))
+	filename := fmt.Sprintf("output/products%s.csv", time.Now().Format("2006-01-02_15:04:05"))
 
 	f, err := os.Create(filename)
 	if err != nil {
@@ -105,12 +126,12 @@ func main() {
 	}
 	defer f.Close()
 
-	if err := gocsv.MarshalFile(&printers, f); err != nil {
-		fmt.Printf("Can't masrshal printers to csv. Err: %v \n", err)
+	if err := gocsv.MarshalFile(&products, f); err != nil {
+		fmt.Printf("Can't masrshal products to csv. Err: %v \n", err)
 		return
 	}
 
-	fmt.Printf("Fetched %d printers. Saved in file: %s \n", len(printers), filename)
+	fmt.Printf("Fetched %d products. Saved in file: %s \n", len(products), filename)
 }
 
 var priceImgs map[string]bool = map[string]bool{
@@ -169,17 +190,18 @@ func getAttr(attr string, attributes []html.Attribute) string {
 	return ""
 }
 
-type printer struct {
+type product struct {
 	Name     string `csv:"name"`
 	Link     string `csv:"link"`
 	Number   string `csv:"number"`
 	Ean      string `csv:"ean"`
+	ManufacturerNumber      string `csv:"manufacturerNumber"`
 	Price    string `csv:"price"`
 	Currency string `csv:"currency"`
 }
 
 type config struct {
-	Pages []string
+	RootPage string
 }
 
 func loadConfig() (*config, error) {
