@@ -1,4 +1,4 @@
-### Printers parser
+### Products parser
 
 #### Requirements 
 
@@ -6,7 +6,7 @@ Installed Go (https://golang.org/)
 
 #### To run parser 
 
-Put list of the urls in `config.toml` file.
+Put root url in `config.toml` file.
 
 Run in terminal
 ```
